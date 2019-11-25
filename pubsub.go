@@ -26,27 +26,27 @@ type PubSub interface {
 }
 
 type ProducerImpl struct {
-	queue *BoundedQueue
+	queue *SingleTopicPublisher
 }
 
 func (p ProducerImpl) Publish(data string) error {
 	return p.queue.Publish(data)
 }
 
-type BoundedQueue struct {
+type SingleTopicPublisher struct {
 	rwlock          sync.RWMutex
 	deleted         bool
 	matchedPatterns []string
 	channels        []chan Message
 }
 
-type AggregatedQueue struct {
+type WildcardTopicPublisher struct {
 	incomingChannels []<-chan Message
 	outgoingChannels []chan Message
 	topicPattern     string
 }
 
-func (q *AggregatedQueue) Consumer() <-chan Message {
+func (q *WildcardTopicPublisher) Consumer() <-chan Message {
 	newChannel := make(chan Message)
 	q.outgoingChannels = append(q.outgoingChannels, newChannel)
 	for _, incomingChannel := range q.incomingChannels {
@@ -60,14 +60,14 @@ func (q *AggregatedQueue) Consumer() <-chan Message {
 	return newChannel
 }
 
-func NewAggregatedQueue(topicPattern string, channels []<-chan Message) *AggregatedQueue {
-	return &AggregatedQueue{
+func NewWildcardTopicPublisher(topicPattern string, channels []<-chan Message) *WildcardTopicPublisher {
+	return &WildcardTopicPublisher{
 		topicPattern:     topicPattern,
 		incomingChannels: channels,
 	}
 }
 
-func (q *AggregatedQueue) AddChannel(channel <-chan Message) {
+func (q *WildcardTopicPublisher) AddChannel(channel <-chan Message) {
 	q.incomingChannels = append(q.incomingChannels, channel)
 	for _, outgoingChannel := range q.outgoingChannels {
 		go func(in <-chan Message, out chan Message) {
@@ -80,8 +80,8 @@ func (q *AggregatedQueue) AddChannel(channel <-chan Message) {
 
 type PubSubImpl struct {
 	mutex    sync.Mutex
-	queues   map[string]*BoundedQueue
-	patterns map[string]*AggregatedQueue
+	queues   map[string]*SingleTopicPublisher
+	patterns map[string]*WildcardTopicPublisher
 }
 
 type MessageImpl struct {
@@ -92,15 +92,15 @@ func (m MessageImpl) Data() string {
 	return m.data
 }
 
-func NewBoundedQueue() *BoundedQueue {
-	return &BoundedQueue{
+func NewSingleTopicPublisher() *SingleTopicPublisher {
+	return &SingleTopicPublisher{
 		deleted:         false,
 		matchedPatterns: make([]string, 0),
 		channels:        make([]chan Message, 0),
 	}
 }
 
-func (q *BoundedQueue) Consumer() <-chan Message {
+func (q *SingleTopicPublisher) Consumer() <-chan Message {
 	q.rwlock.Lock()
 	defer q.rwlock.Unlock()
 	channel := make(chan Message)
@@ -108,7 +108,7 @@ func (q *BoundedQueue) Consumer() <-chan Message {
 	return channel
 }
 
-func (q *BoundedQueue) Publish(data string) error {
+func (q *SingleTopicPublisher) Publish(data string) error {
 	q.rwlock.RLock()
 	defer q.rwlock.RUnlock()
 
@@ -126,7 +126,7 @@ func (q *BoundedQueue) Publish(data string) error {
 	return nil
 }
 
-func (q *BoundedQueue) Delete() {
+func (q *SingleTopicPublisher) Delete() {
 	q.rwlock.Lock()
 	defer q.rwlock.Unlock()
 
@@ -138,15 +138,15 @@ func (q *BoundedQueue) Delete() {
 
 func NewPubSub() *PubSubImpl {
 	return &PubSubImpl{
-		queues:   make(map[string]*BoundedQueue),
-		patterns: make(map[string]*AggregatedQueue),
+		queues:   make(map[string]*SingleTopicPublisher),
+		patterns: make(map[string]*WildcardTopicPublisher),
 	}
 }
 
-func (pubsub *PubSubImpl) findOrCreateQueue(topic string) *BoundedQueue {
+func (pubsub *PubSubImpl) findOrCreateQueue(topic string) *SingleTopicPublisher {
 	queue, ok := pubsub.queues[topic]
 	if !ok {
-		queue = NewBoundedQueue()
+		queue = NewSingleTopicPublisher()
 		pubsub.queues[topic] = queue
 	}
 	return queue
@@ -171,7 +171,7 @@ func (pubsub *PubSubImpl) Subscribe(topicPattern string) (<-chan Message, error)
 	if err != nil {
 		return nil, err
 	}
-	aggregatedQueue := NewAggregatedQueue(topicPattern, channels)
+	aggregatedQueue := NewWildcardTopicPublisher(topicPattern, channels)
 	pubsub.patterns[topicPattern] = aggregatedQueue
 
 	return aggregatedQueue.Consumer(), nil
