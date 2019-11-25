@@ -46,6 +46,8 @@ type WildcardTopicPublisher struct {
 	topicPattern     string
 }
 
+// Consumer returns a channel that provides a stream of messages published
+// to this topic pattern
 func (q *WildcardTopicPublisher) Consumer() <-chan Message {
 	newChannel := make(chan Message)
 	q.outgoingChannels = append(q.outgoingChannels, newChannel)
@@ -67,6 +69,8 @@ func NewWildcardTopicPublisher(topicPattern string, channels []<-chan Message) *
 	}
 }
 
+// AddChannel adds a new publishing channel that matches the topic pattern
+// to this publisher
 func (q *WildcardTopicPublisher) AddChannel(channel <-chan Message) {
 	q.incomingChannels = append(q.incomingChannels, channel)
 	for _, outgoingChannel := range q.outgoingChannels {
@@ -100,6 +104,8 @@ func NewSingleTopicPublisher() *SingleTopicPublisher {
 	}
 }
 
+// Consumer returns a channel that provides a stream of messages published
+// to this topic pattern
 func (q *SingleTopicPublisher) Consumer() <-chan Message {
 	q.rwlock.Lock()
 	defer q.rwlock.Unlock()
@@ -108,6 +114,7 @@ func (q *SingleTopicPublisher) Consumer() <-chan Message {
 	return channel
 }
 
+// Publish publishes data to this topic
 func (q *SingleTopicPublisher) Publish(data string) error {
 	q.rwlock.RLock()
 	defer q.rwlock.RUnlock()
@@ -126,6 +133,7 @@ func (q *SingleTopicPublisher) Publish(data string) error {
 	return nil
 }
 
+// Delete deletes this topic publisher and should stop receiving anymore messages
 func (q *SingleTopicPublisher) Delete() {
 	q.rwlock.Lock()
 	defer q.rwlock.Unlock()
@@ -152,6 +160,8 @@ func (pubsub *PubSubImpl) findOrCreateQueue(topic string) *SingleTopicPublisher 
 	return queue
 }
 
+// Subscribe returns a channel for all messages matching this topic pattern, either
+// already publishing or future new publishers.
 func (pubsub *PubSubImpl) Subscribe(topicPattern string) (<-chan Message, error) {
 	pubsub.mutex.Lock()
 	defer pubsub.mutex.Unlock()
@@ -193,6 +203,7 @@ func (pubsub *PubSubImpl) NewProducer(topic string) (Producer, error) {
 	return ProducerImpl{queue: queue}, nil
 }
 
+// DeleteTopic deletes a topic that was previous added by a producer
 func (pubsub *PubSubImpl) DeleteTopic(topic string) error {
 	pubsub.mutex.Lock()
 	defer pubsub.mutex.Unlock()
